@@ -12,6 +12,10 @@ from core.logging import get_logger, log_business_event
 logger = get_logger("api_router")
 bp = Blueprint('api', __name__)
 
+def _serialize(db_event) -> dict:
+    """Converte o modelo SQLAlchemy no schema Pydantic e devolve um dict JSON-safe"""
+    return Event.model_validate(db_event).model_dump(mode="json")
+
 @bp.route("/", methods=['POST'])
 def create_event():
     logger.info("API - Criando novo evento")
@@ -31,7 +35,7 @@ def create_event():
                 "method": "API"
             })
             
-            return jsonify(result.model_dump())
+            return jsonify(_serialize(result))
             
     except ValueError as e:
         logger.warning(f"Erro de validação na criação do evento: {str(e)}")
@@ -60,7 +64,7 @@ def read_events():
                 "method": "API"
             })
             
-            return jsonify([event.model_dump() for event in events])
+            return jsonify([_serialize(event) for event in events])
             
     except Exception as e:
         logger.error(f"Erro ao listar eventos: {str(e)}")
@@ -80,7 +84,7 @@ def get_event_by_token(edit_token: str):
                 "method": "API"
             })
             
-            return jsonify(result.model_dump())
+            return jsonify(_serialize(result))
             
     except EventNotFoundError:
         logger.warning(f"Evento não encontrado para token: {edit_token[:8]}...")
@@ -108,7 +112,7 @@ def update_event(edit_token: str):
                 "method": "API"
             })
             
-            return jsonify(result.model_dump())
+            return jsonify(_serialize(result))
             
     except EventNotFoundError:
         logger.warning(f"Evento não encontrado para atualização: {edit_token[:8]}...")
