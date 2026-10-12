@@ -21,6 +21,12 @@ variable "cluster_version" {
   }
 }
 
+variable "cluster_creator_admin_permissions" {
+  description = "Concede permissão de admin no cluster ao usuário/role IAM que executa o apply (bootstrap_cluster_creator_admin_permissions). Alterar após a criação força a recriação do cluster."
+  type        = bool
+  default     = true
+}
+
 variable "vpc_cidr" {
   description = "CIDR da VPC dedicada."
   type        = string
