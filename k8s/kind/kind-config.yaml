@@ -1,0 +1,9 @@
+# Cluster de teste: expõe o NodePort 30080 em localhost:8080
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP

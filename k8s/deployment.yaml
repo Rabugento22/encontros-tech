@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: encontros-tech
+  labels:
+    app: encontros-tech
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: encontros-tech
+  template:
+    metadata:
+      labels:
+        app: encontros-tech
+    spec:
+      initContainers:
+        # A app cria as tabelas no import; espera o Postgres aceitar conexões.
+        - name: wait-for-db
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h db -p 5432; do echo aguardando db; sleep 2; done"]
+      containers:
+        - name: app
+          image: rubensrsilva/encontros-tech-pos:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: encontros-tech-config
+            - secretRef:
+                name: encontros-tech-secret
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
