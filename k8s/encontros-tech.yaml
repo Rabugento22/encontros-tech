@@ -124,7 +124,7 @@ spec:
           command: ["sh", "-c", "until pg_isready -h db -p 5432; do echo aguardando db; sleep 2; done"]
       containers:
         - name: app
-          image: rubensrsilva/encontros-tech-pos:latest
+          image: rubensrsilva/encontros-tech-pos:v02
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -134,17 +134,21 @@ spec:
                 name: encontros-tech-config
             - secretRef:
                 name: encontros-tech-secret
+          # Readiness: depende do banco (SELECT 1). Falha tira o pod do Service,
+          # sem reiniciar o container. timeout (5s) > connect_timeout da app (3s).
           readinessProbe:
             httpGet:
-              path: /
+              path: /ready
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 6
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Liveness: só o processo (não consulta o banco). Uma queda do Postgres
+          # não deve reiniciar a app. Tolerância: 15s + 3 x 10s = 45s de boot.
           livenessProbe:
             httpGet:
-              path: /
+              path: /health
               port: http
             initialDelaySeconds: 15
             periodSeconds: 10

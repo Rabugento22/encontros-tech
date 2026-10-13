@@ -52,9 +52,10 @@ def after_request(response):
     return response
 
 # Importar e registrar blueprints
-from routers import api_router, page_router
+from routers import api_router, page_router, health_router
 app.register_blueprint(api_router.bp, url_prefix='/api/events')
 app.register_blueprint(page_router.bp)
+app.register_blueprint(health_router.bp)
 
 main_logger.info(f"Aplicação Flask inicializada - Versão: {settings.SERVICE_VERSION}")
 main_logger.info(f"Debug mode: {settings.DEBUG} | Log level: {settings.LOG_LEVEL}")
