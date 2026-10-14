@@ -14,8 +14,8 @@
         "-e",
         "HOME=/home/appuser",
         "-v",
-        "${HOME}/.kube:/home/appuser/.kube:ro",
-        "flux159/mcp-server-kubernetes"
+        "${HOME}/.kube/config:/home/appuser/.kube/config:ro",
+        "flux159/mcp-server-kubernetes:latest"
       ],
       "env": {}
     },
