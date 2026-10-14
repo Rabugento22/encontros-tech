@@ -7,6 +7,12 @@
         "run",
         "-i",
         "--rm",
+        "--network",
+        "host",
+        "--user",
+        "1000:1000",
+        "-e",
+        "HOME=/home/appuser",
         "-v",
         "${HOME}/.kube:/home/appuser/.kube:ro",
         "flux159/mcp-server-kubernetes"
