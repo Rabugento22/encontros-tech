@@ -14,7 +14,9 @@ Aplicação web para cadastro e consulta de eventos de tecnologia.
 4. [Como rodar local](#como-rodar-local)
 5. [Testes e dados de exemplo](#testes-e-dados-de-exemplo)
 6. [Provisionar a infraestrutura com Terraform](#provisionar-a-infraestrutura-com-terraform)
+   - [AWS (EKS)](#aws-eks) · [DigitalOcean (DOKS)](#digitalocean-doks)
 7. [Deploy no cluster Kubernetes](#deploy-no-cluster-kubernetes)
+   - [Cluster local com kind](#cluster-local-com-kind) · [EKS](#em-um-cluster-eks) · [DigitalOcean](#em-um-cluster-digitalocean-doks)
 8. [Endpoints de saúde](#endpoints-de-saúde)
 9. [Variáveis de ambiente](#variáveis-de-ambiente)
 10. [Limitações e pontos a confirmar](#limitações-e-pontos-a-confirmar)
@@ -46,9 +48,12 @@ O Encontros Tech permite listar, buscar, criar e editar eventos de tecnologia, p
 │   ├── templates/  static/
 │   └── tests/
 ├── k8s/
-│   ├── encontros-tech.yaml   # todos os manifests em um único arquivo
+│   ├── encontros-tech.yaml   # todos os manifests em um único arquivo (kind/EKS)
+│   ├── digitalocean/         # manifests separados para o DOKS (db, app, configmap, secret.example)
 │   └── kind/kind-config.yaml # configuração do cluster kind
-└── terraform/                # cluster EKS na AWS
+├── terraform/                # cluster EKS na AWS
+├── terraform-do/             # cluster DOKS na DigitalOcean (versão de baixo custo)
+└── backup/terraform-aws/     # cópia dos .tf da AWS feita antes de adicionar a DigitalOcean
 ```
 
 ## Stack
@@ -68,6 +73,8 @@ O Encontros Tech permite listar, buscar, criar e editar eventos de tecnologia, p
 | Terraform | `>= 1.5.0` | `terraform/providers.tf` |
 | Provider AWS (Terraform) | `~> 5.0` | `terraform/providers.tf` |
 | Kubernetes (EKS) | `1.36` (default da variável) | `terraform/variables.tf` |
+| Provider DigitalOcean (Terraform) | `~> 2.0` | `terraform-do/providers.tf` |
+| Kubernetes (DOKS) | última versão disponível na criação (`data.digitalocean_kubernetes_versions`) | `terraform-do/main.tf` |
 
 Arquitetura em camadas: **router → service → model**, com `core/database.py` como único ponto de
 configuração da conexão com o PostgreSQL (`src/core/database.py`).
@@ -79,6 +86,7 @@ configuração da conexão com o PostgreSQL (`src/core/database.py`).
 | Rodar local | Docker e Docker Compose | **A confirmar** (não declarada) |
 | Testes e seed | Python 3.13 (o seed usa só a biblioteca padrão) | 3.13 (`src/Dockerfile`) |
 | Cluster local | kind e kubectl | **A confirmar** (não declarada) |
+| Terraform/DigitalOcean | Terraform `>= 1.5.0`, token da API em `DIGITALOCEAN_TOKEN` e `doctl` (usado em `kubeconfig_command`, `terraform-do/outputs.tf`) | versão do `doctl`: **A confirmar** |
 | Terraform/AWS | Terraform `>= 1.5.0` (`terraform/providers.tf`), AWS CLI (usado em `kubeconfig_command`, `terraform/outputs.tf`) e credenciais AWS | AWS CLI: **A confirmar**; credenciais/permissões: **A confirmar** |
 
 ## Como rodar local
@@ -150,6 +158,16 @@ python3 scripts/seed.py --base-url http://localhost:8080  # ex.: cluster kind
 
 ## Provisionar a infraestrutura com Terraform
 
+Há duas opções independentes, cada uma na sua pasta (os arquivos têm os mesmos nomes, por isso
+não ficam juntos):
+
+| Provedor | Pasta | Perfil |
+|---|---|---|
+| AWS | `terraform/` | EKS com 2 nodes, VPC e NAT Gateway |
+| DigitalOcean | `terraform-do/` | DOKS com 1 node pequeno, pensado para o menor custo |
+
+### AWS (EKS)
+
 A pasta `terraform/` cria um cluster **EKS** gerenciado na AWS.
 
 | Recurso | Detalhe (`terraform/main.tf`) |
@@ -196,9 +214,75 @@ Observações:
 - O Terraform **não** implanta a aplicação; o deploy é feito com os manifests de `k8s/`.
 - Custos e permissões IAM necessárias para o `apply`: **A confirmar**.
 
+### DigitalOcean (DOKS)
+
+A pasta `terraform-do/` cria um cluster **DOKS** (Kubernetes gerenciado da DigitalOcean) pensado
+para rodar os 2 pods da aplicação (app e PostgreSQL) com o menor custo.
+
+| Recurso | Detalhe (`terraform-do/main.tf`) |
+|---|---|
+| Cluster DOKS | control plane **sem HA** (`ha = false`, gratuito), `auto_upgrade` e `surge_upgrade` desligados |
+| Node pool | `node_count = 1`, tamanho `s-1vcpu-2gb`, sem autoscale |
+| Versão do Kubernetes | a mais recente disponível na criação; `ignore_changes = [version]` evita recriar o cluster quando sair uma nova |
+
+Não há VPC, NAT nem IAM para declarar: a DigitalOcean cria a rede do cluster sozinha.
+
+#### Variáveis (`terraform-do/variables.tf`)
+
+| Variável | Default | Descrição |
+|---|---|---|
+| `region` | `nyc3` | região DigitalOcean |
+| `cluster_name` | `encontros-tech` | nome do cluster e tag dos nodes |
+| `node_size` | `s-1vcpu-2gb` | tamanho do droplet do node |
+| `node_count` | `1` | quantidade de nodes |
+
+#### Custo estimado
+
+Valores de tabela da DigitalOcean, **a confirmar na página de preços antes do `apply`**
+(não são lidos de nenhum arquivo do repositório):
+
+| Item | Estimativa |
+|---|---|
+| Control plane (sem HA) | gratuito |
+| 1 node `s-1vcpu-2gb` | ~US$ 12/mês |
+| Volume do PostgreSQL (1Gi) | ~US$ 0,10/mês |
+| **Total** | **~US$ 12/mês** |
+
+Não estão incluídos: LoadBalancer (~US$ 12/mês; por isso o Service usa `NodePort`) e tráfego acima
+da franquia do droplet. Cada node extra (`-var node_count=2`) soma o valor de um droplet.
+
+#### Comandos
+
+```bash
+export DIGITALOCEAN_TOKEN=...       # token da API; não fica no código
+cd terraform-do
+terraform init
+terraform plan                      # revise (e confira o custo) antes de aplicar
+terraform apply
+$(terraform output -raw kubeconfig_command)   # doctl kubernetes cluster kubeconfig save <id>
+kubectl get nodes
+terraform destroy                   # ao terminar: o droplet é cobrado enquanto existir
+```
+
+Outputs (`terraform-do/outputs.tf`): `cluster_name`, `cluster_endpoint`, `kubeconfig_command`.
+
+Observações:
+
+- O estado é **local** (sem `backend`); `terraform-do/.gitignore` ignora `.terraform/`, `*.tfstate*`,
+  `*.tfvars` e `*.tfplan`. O `.terraform.lock.hcl` é versionável.
+- O Terraform **não** implanta a aplicação; use os manifests de `k8s/digitalocean/`.
+- Alertas de **fatura** (billing) não existem na API da DigitalOcean e não são criados aqui; se
+  quiser, configure em *Billing → Billing alerts* no painel.
+- Com 1 node, app e banco ficam no mesmo node: se ele cair, os dois pods caem (sem alta disponibilidade).
+
 ## Deploy no cluster Kubernetes
 
-Todos os manifests estão em um único arquivo: `k8s/encontros-tech.yaml`.
+Há dois conjuntos de manifests:
+
+- `k8s/encontros-tech.yaml`: tudo em um arquivo, usado no kind e no EKS;
+- `k8s/digitalocean/`: os mesmos recursos separados em arquivos, ajustados para o DOKS (ver abaixo).
+
+A tabela e os comandos a seguir descrevem `k8s/encontros-tech.yaml`.
 
 | # | Recurso | Nome | Função |
 |---|---|---|---|
@@ -246,6 +330,44 @@ Gere o kubeconfig (seção Terraform) e aplique o mesmo manifest. Pontos **A con
 - a imagem `rubensrsilva/encontros-tech-pos:latest` estar publicada no registro;
 - como expor a aplicação externamente (o Service é `NodePort`; não há LoadBalancer/Ingress);
 - StorageClass/driver de volumes para o PVC do PostgreSQL.
+
+### Em um cluster DigitalOcean (DOKS)
+
+Os manifests ficam em `k8s/digitalocean/` e criam os mesmos 2 pods (PostgreSQL e app):
+
+| Arquivo | Recursos |
+|---|---|
+| `configmap.yaml` | ConfigMap `encontros-tech-config` |
+| `db.yaml` | Service headless `db` e StatefulSet `db` (PVC de 1Gi, `storageClassName: do-block-storage`) |
+| `app.yaml` | Deployment `encontros-tech` (imagem `rubensrsilva/encontros-tech-pos:v02`) e Service `NodePort` `30080` |
+| `secret.example.yaml` | modelo do Secret, com `TROCAR` no lugar da senha |
+
+Diferenças em relação a `k8s/encontros-tech.yaml`:
+
+- o **Secret não é versionado**: é criado no cluster com `kubectl create secret` (o
+  `k8s/digitalocean/.gitignore` ignora um eventual `secret.yaml`), com senha aleatória;
+- a storage class é explícita (`do-block-storage`);
+- o Service continua `NodePort`, em vez de LoadBalancer, para não pagar o balanceador.
+
+```bash
+$(terraform -chdir=terraform-do output -raw kubeconfig_command)
+
+DB_PASS=$(openssl rand -hex 16)
+kubectl create secret generic encontros-tech-secret \
+  --from-literal=POSTGRES_USER=encontros_tech \
+  --from-literal=POSTGRES_PASSWORD="$DB_PASS" \
+  --from-literal=POSTGRES_DB=encontros_tech \
+  --from-literal=DATABASE_URL="postgresql://encontros_tech:${DB_PASS}@db:5432/encontros_tech"
+
+kubectl apply -f k8s/digitalocean/configmap.yaml -f k8s/digitalocean/db.yaml -f k8s/digitalocean/app.yaml
+kubectl rollout status statefulset/db
+kubectl rollout status deployment/encontros-tech
+kubectl get nodes -o wide           # IP público do node
+```
+
+Acesse `http://<IP-público-do-node>:30080`. Não testado em um cluster real: os manifests tiveram só a
+sintaxe YAML verificada. Se a porta `30080` não responder, **A confirmar** as regras de firewall do
+node pool na DigitalOcean.
 
 ## Endpoints de saúde
 
@@ -311,5 +433,7 @@ Outras observações:
 - **`SECRET_KEY` fixa no código**, com `TODO: Move to settings` (`src/main.py`).
 - **`api-requests.http`** cita `/docs` e `/redoc`, que não existem na aplicação Flask.
 - **Logs de probes**: toda requisição é logada em INFO (`src/main.py`), incluindo `/health` e `/ready`.
-- **Versões de Docker, Compose, kind, kubectl e AWS CLI**, permissões/custos AWS e a exposição
+- **DigitalOcean**: custos são estimativas de tabela; acesso externo via `NodePort` e o
+  `k8s/digitalocean/` não foram testados em cluster real.
+- **Versões de Docker, Compose, kind, kubectl, AWS CLI e doctl**, permissões/custos AWS e a exposição
   externa no EKS: **A confirmar** (ver seções acima).
