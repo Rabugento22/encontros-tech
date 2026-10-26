@@ -1,0 +1,2 @@
+# Secret com credenciais reais: crie com `kubectl create secret` e não versione
+secret.yaml

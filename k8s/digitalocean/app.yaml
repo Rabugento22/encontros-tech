@@ -1,0 +1,75 @@
+# Pod 2: aplicação Flask.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: encontros-tech
+  labels:
+    app: encontros-tech
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: encontros-tech
+  template:
+    metadata:
+      labels:
+        app: encontros-tech
+    spec:
+      initContainers:
+        # A app cria as tabelas no import; espera o Postgres aceitar conexões.
+        - name: wait-for-db
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h db -p 5432; do echo aguardando db; sleep 2; done"]
+      containers:
+        - name: app
+          image: rubensrsilva/encontros-tech-pos:v02
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: encontros-tech-config
+            - secretRef:
+                name: encontros-tech-secret
+          # Readiness depende do banco; liveness só do processo (queda do Postgres não reinicia a app).
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+# NodePort em vez de LoadBalancer: o LB da DigitalOcean custa ~US$ 12/mês.
+# Acesso: http://<IP-público-do-node>:30080
+apiVersion: v1
+kind: Service
+metadata:
+  name: encontros-tech
+  labels:
+    app: encontros-tech
+spec:
+  type: NodePort
+  selector:
+    app: encontros-tech
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      nodePort: 30080

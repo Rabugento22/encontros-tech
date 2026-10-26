@@ -1,0 +1,14 @@
+# Cache de providers e módulos
+.terraform/
+
+# State local: contém dados sensíveis e não deve ser versionado
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Variáveis com valores locais/segredos
+*.tfvars
+*.tfvars.json
+
+# Planos salvos
+*.tfplan
